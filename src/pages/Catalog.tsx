@@ -1,4 +1,4 @@
-import { Filter, ChevronDown } from 'lucide-react';
+import { Filter, ChevronDown, Star } from 'lucide-react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
