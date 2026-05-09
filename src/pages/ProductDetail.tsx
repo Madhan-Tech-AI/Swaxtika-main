@@ -268,9 +268,9 @@ export function ProductDetail() {
           {/* ── Column 2: Product Core Info ── */}
           <div className="lg:col-span-4 flex flex-col">
             {product.seller_id ? (
-              <a href={`/category/all`} className="text-primary text-sm font-semibold hover:underline mb-1">
+              <Link to={`/store/${product.seller_id}`} className="text-primary text-sm font-semibold hover:underline mb-1">
                 Visit the {sellerName || 'Swaxtika'} Store
-              </a>
+              </Link>
             ) : (
               <Link to="/category/all" className="text-primary text-sm font-semibold hover:underline mb-1">
                 Visit the Swaxtika Store
@@ -422,14 +422,14 @@ export function ProductDetail() {
                   Buy Now
                 </button>
                 {product.seller_id && (
-                  <a
-                    href="/category/all"
+                  <Link
+                    to={`/store/${product.seller_id}`}
                     className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-foreground font-medium py-2.5 rounded-full shadow-sm transition-all text-sm flex items-center justify-center gap-2 group"
                   >
                     <Store className="w-4 h-4 text-primary" />
                     Visit {sellerName || 'Seller'} Store
                     <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
-                  </a>
+                  </Link>
                 )}
               </div>
 
