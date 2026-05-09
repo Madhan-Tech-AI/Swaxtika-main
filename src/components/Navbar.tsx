@@ -74,7 +74,7 @@ export function Navbar() {
       setIsSearching(true);
       try {
         // Search products
-        const { data: productData, error: productError } = await supabase
+        const { data: productData } = await supabase
           .from('products')
           .select('id, name, price, image, category')
           .ilike('name', `%${searchTerm}%`)
@@ -82,7 +82,7 @@ export function Navbar() {
           .limit(4);
 
         // Search stores
-        const { data: storeData, error: storeError } = await supabase
+        const { data: storeData } = await supabase
           .from('seller_applications')
           .select('id, business_name, store_logo')
           .ilike('business_name', `%${searchTerm}%`)
