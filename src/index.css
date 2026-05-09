@@ -32,3 +32,13 @@
     @apply border border-primary text-primary px-6 py-2 rounded-md hover:bg-primary/5 transition-colors duration-200 font-medium;
   }
 }
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

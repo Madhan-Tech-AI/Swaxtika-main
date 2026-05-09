@@ -83,13 +83,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       
       if (!error && data) {
         setProfile(data);
+      } else if (!data) {
+        setProfile({ id: userId });
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
+      setProfile({ id: userId });
     } finally {
       setIsLoading(false);
     }

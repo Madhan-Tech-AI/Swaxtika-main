@@ -37,7 +37,7 @@ export function TodayDeals() {
       setLoading(true);
       try {
         // Fetch products marked as deals, or fetch from a 'deals' table
-        const { data } = await supabase.from('products').select('*').eq('is_deal', true);
+        const { data } = await supabase.from('products').select('*').eq('is_deal', true).eq('status', 'Active');
         if (data) setDeals(data);
       } catch (error) {
         console.error('Error fetching deals:', error);
@@ -128,9 +128,9 @@ export function TodayDeals() {
                     <Star className="w-4 h-4 fill-current" />
                     <span className="text-sm font-medium text-foreground/80">{deal.rating || 5.0} <span className="text-foreground/50">({deal.reviews || 0} reviews)</span></span>
                   </div>
-                  <Link to={`/product/${deal.id}`}>
+                  <a href={`/product/${deal.id}`} target="_blank" rel="noopener noreferrer">
                     <h3 className="text-xl font-display font-bold text-foreground mb-2 leading-tight group-hover:text-primary transition-colors">{deal.name}</h3>
-                  </Link>
+                  </a>
                   <p className="text-sm text-foreground/60 mb-6 line-clamp-2">{deal.description}</p>
                 </div>
 

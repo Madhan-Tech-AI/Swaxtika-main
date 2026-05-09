@@ -391,6 +391,14 @@ export function Account() {
                               <span>Shipping: <strong className="text-foreground">{order.shipping_fee === 0 ? 'Free' : `₹${order.shipping_fee}`}</strong></span>
                               {order.shipping_address?.city && <span>To: <strong className="text-foreground">{order.shipping_address.city}, {order.shipping_address.pin}</strong></span>}
                             </div>
+                            <div className="mt-4 pt-3 border-t border-gray-200">
+                              <Link
+                                to={`/track-order?orderId=${order.id.split('-')[0].toUpperCase()}`}
+                                className="inline-flex items-center gap-2 bg-primary text-white text-xs font-bold px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
+                              >
+                                <ShoppingBag className="w-3.5 h-3.5" /> Track Order
+                              </Link>
+                            </div>
                           </div>
                         )}
                       </div>

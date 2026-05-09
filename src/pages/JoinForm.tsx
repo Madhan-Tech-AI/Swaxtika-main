@@ -58,7 +58,7 @@ export const JoinForm = () => {
     <div className="min-h-screen bg-[#faf9f6] py-12 px-4 sm:px-6 lg:px-8 font-serif">
       <div className="max-w-3xl mx-auto">
         <div className="text-center mb-12">
-          <h2 className="text-4xl font-light text-amber-900 mb-4 tracking-wide">Join Sacred Shoppe as a Seller</h2>
+          <h2 className="text-4xl font-light text-amber-900 mb-4 tracking-wide">Join Swaxthika as a Seller</h2>
           <p className="text-stone-600 text-lg">Partner with us to bring authentic spiritual and religious products to our community.</p>
         </div>
 

@@ -1,5 +1,5 @@
 import { ShieldCheck, CreditCard, Wallet, Truck, Loader2 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
@@ -74,7 +74,19 @@ export function Checkout() {
     }
   };
 
+  const loadRazorpay = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as any).Razorpay) { resolve(true); return; }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handlePlaceOrder = async (e: React.MouseEvent) => {
+    e.preventDefault();
     if (!addressComplete) {
       showToast('error', 'Address Required', 'Please complete and save your address first.');
       return;
@@ -83,52 +95,92 @@ export function Checkout() {
       showToast('error', 'Payment Required', 'Please select a payment method.');
       return;
     }
-    e.preventDefault();
+
     setPlacingOrder(true);
 
     try {
-      const subtotalVal = cartItems.reduce((acc: number, item: any) => acc + (item.products.price * item.quantity), 0);
-      const shippingVal = subtotalVal > 1000 || subtotalVal === 0 ? 0 : 150;
+      const subtotalVal = cartItems.reduce((acc: number, item: any) =>
+        acc + (item.products.price * item.quantity), 0);
+      const shippingVal = subtotalVal > 1000 ? 0 : 150;
       const totalVal = subtotalVal + shippingVal;
 
-      // Build order items array
-      const orderItems = cartItems.map((item: any) => ({
-        product_id: item.products.id,
-        name: item.products.name,
-        price: item.products.price,
-        quantity: item.quantity,
-        image: item.products.image || null,
-      }));
+      // Get auth session once for both Razorpay and place-order calls
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-      // Insert order into DB
-      const { error: orderError } = await supabase.from('orders').insert([{
-        user_id: user!.id,
-        customer_name: addressData.fullName,
-        customer_email: addressData.email || user!.email,
-        customer_phone: addressData.phone,
-        shipping_address: addressData,
-        items: orderItems,
-        subtotal: subtotalVal,
-        shipping_fee: shippingVal,
-        total_amount: totalVal,
-        payment_method: paymentMethod,
-        status: 'Pending',
-      }]);
+      // For UPI / Card — create Razorpay order first
+      let razorpay_order_id: string | undefined;
+      let razorpay_payment_id: string | undefined;
 
-      if (orderError) throw orderError;
+      if (paymentMethod !== 'cod') {
+        const rzpLoaded = await loadRazorpay();
+        if (!rzpLoaded) throw new Error('Payment gateway failed to load. Please try again.');
 
-      // Clear cart
-      const { error: cartError } = await supabase
-        .from('cart_items')
-        .delete()
-        .eq('user_id', user!.id);
+        // Create Razorpay order via Edge Function
+        const rzpRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-razorpay-order`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ amount_paise: Math.round(totalVal * 100) }),
+        });
 
-      if (cartError) throw cartError;
+        const rzpData = await rzpRes.json();
+        if (!rzpData.razorpay_order_id) throw new Error(rzpData.error || 'Failed to initiate payment');
+
+        // Open Razorpay checkout modal
+        razorpay_payment_id = await new Promise<string>((resolve, reject) => {
+          const rzp = new (window as any).Razorpay({
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+            amount: rzpData.amount,
+            currency: 'INR',
+            name: 'Swaxthika',
+            description: 'Order Payment',
+            order_id: rzpData.razorpay_order_id,
+            prefill: {
+              name: addressData.fullName,
+              email: addressData.email || user?.email,
+              contact: addressData.phone,
+            },
+            theme: { color: '#7c3aed' },
+            handler: (response: any) => resolve(response.razorpay_payment_id),
+            modal: { ondismiss: () => reject(new Error('Payment cancelled')) },
+          });
+          rzp.open();
+        });
+
+        razorpay_order_id = rzpData.razorpay_order_id;
+      }
+
+      // Call atomic place-order Edge Function
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/place-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          items: cartItems.map((item: any) => ({
+            product_id: item.products.id,
+            quantity: item.quantity,
+          })),
+          shipping_address: addressData,
+          payment_method: paymentMethod,
+          razorpay_order_id,
+          razorpay_payment_id,
+        }),
+      });
+
+      const result = await res.json();
+      if (!result.success) throw new Error(result.error);
 
       showToast('success', 'Order Placed! 🎉', 'Your order has been placed. Track it in My Orders.');
       navigate('/account');
     } catch (err: any) {
-      console.error('Error placing order:', err);
+      console.error('Order error:', err);
       showToast('error', 'Order Failed', err.message || 'Could not place order at this time.');
     } finally {
       setPlacingOrder(false);

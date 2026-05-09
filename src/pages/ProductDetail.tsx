@@ -1,31 +1,14 @@
-import { Star, ShieldCheck, Truck, RotateCcw, Share2, Loader2, ChevronRight, Lock, MapPin, Store } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Star, ShieldCheck, Truck, RotateCcw, Share2, Loader2, ChevronRight, Lock, MapPin, Store, Camera, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 
-const REVIEWS = [
-  { name: 'Priya S.', stars: 5, date: '3 April 2026', comment: 'Absolutely stunning. The craftsmanship is exceptional — it arrived beautifully packed and felt truly sacred.' },
-  { name: 'Rajan M.', stars: 4, date: '29 September 2025', comment: 'Very authentic quality. Delivery was prompt and the item was exactly as described. Highly recommend.' },
-  { name: 'Sunita K.', stars: 5, date: '17 February 2026', comment: 'I purchased this for our home puja room and it looks magnificent. Worth every rupee.' },
-  { name: 'Arjun V.', stars: 5, date: '21 January 2026', comment: 'The detail work is breathtaking. You can feel the devotion that went into making this.' },
-];
-
-function StarRow({ count, filled }: { count: number; filled: boolean }) {
-  return (
-    <div className="flex gap-0.5">
-      {Array.from({ length: count }).map((_, i) => (
-        <Star key={i} className={`w-3.5 h-3.5 ${filled ? 'text-amber-400 fill-amber-400' : 'text-gray-200 fill-gray-200'}`} />
-      ))}
-    </div>
-  );
-}
-
 export function ProductDetail() {
   const { id } = useParams();
   const [product, setProduct] = useState<any>(null);
-  const [related, setRelated] = useState<any[]>([]);
+  const [sectionProducts, setSectionProducts] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [activeImage, setActiveImage] = useState('');
@@ -34,28 +17,138 @@ export function ProductDetail() {
   const [pincodeMsg, setPincodeMsg] = useState('');
   const [wishlisted, setWishlisted] = useState(false);
   const [banners, setBanners] = useState<any[]>([]);
+  const [sellerName, setSellerName] = useState('');
+  // Reviews state
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHover, setReviewHover] = useState(0);
+  const [reviewTitle, setReviewTitle] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewImages, setReviewImages] = useState<string[]>([]);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [uploadingReviewImg, setUploadingReviewImg] = useState(false);
+  const reviewImgRef = useRef<HTMLInputElement>(null);
 
   const { requireAuth, user } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
 
   useEffect(() => {
-    const fetch = async () => {
+    const fetchData = async () => {
       if (!id) return;
       setLoading(true);
       const { data } = await supabase.from('products').select('*').eq('id', id).single();
       if (data) {
         setProduct(data);
         setActiveImage(data.image);
-        const { data: rel } = await supabase.from('products').select('*').eq('category', data.category).neq('id', id).limit(4);
-        if (rel) setRelated(rel);
+
+        if (data.seller_id) {
+          const { data: sData } = await supabase.from('seller_applications').select('business_name').eq('id', data.seller_id).single();
+          if (sData) setSellerName(sData.business_name);
+        }
+
+        // Fetch ALL active products except current
+        const { data: allProducts } = await supabase.from('products').select('*').eq('status', 'Active').neq('id', id).limit(50);
+        const pool = allProducts || [];
+        const usedIds = new Set<string>();
+
+        const pickUnique = (filter: (p: any) => boolean, count: number) => {
+          const result: any[] = [];
+          for (const p of pool) {
+            if (result.length >= count) break;
+            if (!usedIds.has(p.id) && filter(p)) { result.push(p); usedIds.add(p.id); }
+          }
+          return result;
+        };
+
+        const sections: Record<string, any[]> = {};
+        sections.fbt = pickUnique(p => p.category === data.category, 5);
+        sections.related = pickUnique(p => p.category !== data.category, 5);
+        sections.sponsored = pickUnique(p => p.is_featured, 5);
+        sections.featured = pickUnique(p => p.is_deal, 5);
+        sections.viewed = pickUnique(() => true, 5);
+        // Popular: fallback to remaining products
+        sections.popular = pickUnique(() => true, 5);
+
+        setSectionProducts(sections);
+
+        // Fetch reviews and enrich with profile names
+        const { data: revs } = await supabase.from('product_reviews').select('*').eq('product_id', id).order('created_at', { ascending: false });
+        if (revs && revs.length > 0) {
+          const userIds = [...new Set(revs.map(r => r.user_id))];
+          const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, email').in('id', userIds);
+          const profileMap: Record<string, string> = {};
+          (profiles || []).forEach((p: any) => { profileMap[p.id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email?.split('@')[0] || 'User'; });
+          setReviews(revs.map(r => ({ ...r, user_name: profileMap[r.user_id] || r.user_name || 'User' })));
+        } else {
+          setReviews([]);
+        }
+
         const { data: bns } = await supabase.from('banners').select('*');
         if (bns) setBanners(bns);
       }
       setLoading(false);
     };
-    fetch();
+    fetchData();
   }, [id]);
+
+  // Real-time reviews subscription
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`reviews-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_reviews', filter: `product_id=eq.${id}` }, async () => {
+        const { data } = await supabase.from('product_reviews').select('*').eq('product_id', id).order('created_at', { ascending: false });
+        if (data && data.length > 0) {
+          const userIds = [...new Set(data.map(r => r.user_id))];
+          const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, email').in('id', userIds);
+          const profileMap: Record<string, string> = {};
+          (profiles || []).forEach((p: any) => { profileMap[p.id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email?.split('@')[0] || 'User'; });
+          setReviews(data.map(r => ({ ...r, user_name: profileMap[r.user_id] || r.user_name || 'User' })));
+        } else {
+          setReviews(data || []);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id]);
+
+  const handleReviewImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    setUploadingReviewImg(true);
+    try {
+      const file = e.target.files[0];
+      const ext = file.name.split('.').pop();
+      const path = `review-images/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('product-images').upload(path, file);
+      if (error) throw error;
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(path);
+      setReviewImages(prev => [...prev, urlData.publicUrl]);
+    } catch { showToast('error', 'Upload Failed', 'Could not upload image.'); }
+    finally { setUploadingReviewImg(false); }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!reviewRating || !reviewComment.trim()) { showToast('error', 'Incomplete', 'Please add a rating and comment.'); return; }
+    requireAuth(async () => {
+      if (!user || !id) return;
+      setSubmittingReview(true);
+      try {
+        const { data: profile } = await supabase.from('profiles').select('first_name, last_name, email').eq('id', user.id).single();
+        const userName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || profile?.email?.split('@')[0] || 'Customer';
+        const { error } = await supabase.from('product_reviews').insert([{
+          product_id: id, user_id: user.id, user_name: userName,
+          rating: reviewRating, title: reviewTitle.trim() || null,
+          comment: reviewComment.trim(), images: reviewImages,
+        }]);
+        if (error) throw error;
+        showToast('success', 'Review Submitted', 'Thank you for your review!');
+        setShowReviewForm(false); setReviewRating(0); setReviewTitle(''); setReviewComment(''); setReviewImages([]);
+      } catch (err: any) { showToast('error', 'Failed', err?.message || 'Could not submit review.'); }
+      finally { setSubmittingReview(false); }
+    });
+  };
 
   const handleAddToCart = () => {
     requireAuth(async () => {
@@ -146,20 +239,32 @@ export function ProductDetail() {
 
           {/* ── Column 2: Product Core Info ── */}
           <div className="lg:col-span-4 flex flex-col">
-            <Link to={`/category/${product.category?.toLowerCase() || 'all'}`} className="text-primary text-sm font-semibold hover:underline mb-1">
-              Visit the Swaxtika Store
-            </Link>
+            {product.seller_id ? (
+              <a href={`/category/all`} className="text-primary text-sm font-semibold hover:underline mb-1">
+                Visit the {sellerName || 'Swaxtika'} Store
+              </a>
+            ) : (
+              <Link to="/category/all" className="text-primary text-sm font-semibold hover:underline mb-1">
+                Visit the Swaxtika Store
+              </Link>
+            )}
             <h1 className="text-2xl sm:text-3xl font-display font-bold text-foreground leading-snug mb-3">{product.name}</h1>
             
-            {/* Ratings */}
+            {/* Ratings - calculated from real reviews */}
             <div className="flex items-center gap-4 mb-4 pb-4 border-b border-gray-200">
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-sm">4.8</span>
-                <div className="flex gap-0.5">
-                  {[1,2,3,4,5].map(i => <Star key={i} className={`w-3.5 h-3.5 ${i <= 4 ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />)}
-                </div>
-              </div>
-              <span className="text-sm text-primary hover:underline cursor-pointer">{REVIEWS.length} ratings</span>
+              {reviews.length > 0 ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-sm">{(reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)}</span>
+                    <div className="flex gap-0.5">
+                      {[1,2,3,4,5].map(i => <Star key={i} className={`w-3.5 h-3.5 ${i <= Math.round(reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />)}
+                    </div>
+                  </div>
+                  <a href="#customer-reviews" className="text-sm text-primary hover:underline">{reviews.length} rating{reviews.length !== 1 ? 's' : ''}</a>
+                </>
+              ) : (
+                <a href="#customer-reviews" className="text-sm text-foreground/50 hover:text-primary transition-colors">No ratings yet — be the first</a>
+              )}
             </div>
 
             {/* Price Block */}
@@ -288,6 +393,16 @@ export function ProductDetail() {
                 >
                   Buy Now
                 </button>
+                {product.seller_id && (
+                  <a
+                    href="/category/all"
+                    className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-foreground font-medium py-2.5 rounded-full shadow-sm transition-all text-sm flex items-center justify-center gap-2 group"
+                  >
+                    <Store className="w-4 h-4 text-primary" />
+                    Visit {sellerName || 'Seller'} Store
+                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
+                  </a>
+                )}
               </div>
 
               {/* Security info */}
@@ -338,11 +453,10 @@ export function ProductDetail() {
 
         <hr className="my-12 border-gray-200" />
 
-        {/* ── Related Products ── */}
-        {related.length > 0 && (
+        {/* ── Product Sections (5 unique products each, no repeats) ── */}
+        {Object.values(sectionProducts).some(arr => arr.length > 0) && (
           <div className="space-y-16">
-            
-            {/* Top Deals / Banners Section */}
+
             {banners.length > 0 && (
               <div>
                 <h2 className="text-2xl font-bold text-foreground mb-4">Top Deals <span className="text-sm font-normal text-foreground/50 ml-2">Sponsored</span></h2>
@@ -357,173 +471,168 @@ export function ProductDetail() {
               </div>
             )}
 
-            {/* Frequently Bought Together */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Frequently bought together</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {related.map((p) => (
-                  <div key={p.id + 'fbt'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
+            {/* Reusable product grid renderer */}
+            {([
+              { key: 'fbt', title: 'Frequently bought together' },
+              { key: 'related', title: 'Related products with free delivery on eligible orders' },
+              { key: 'sponsored', title: 'Sponsored', suffix: <span className="text-xs font-normal text-foreground/50 ml-2 cursor-pointer hover:underline">Leave ad feedback</span> },
+              { key: 'featured', title: 'Featured items you may like' },
+              { key: 'viewed', title: 'Customers frequently viewed' },
+              { key: 'popular', title: 'Sponsored | Popular products in the last 7 days' },
+            ] as { key: string; title: string; suffix?: React.ReactNode }[]).map(section => {
+              const items = sectionProducts[section.key] || [];
+              if (items.length === 0) return null;
+              return (
+                <div key={section.key}>
+                  <h2 className="text-2xl font-bold text-foreground mb-6">{section.title}{section.suffix}</h2>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {items.map((p: any) => (
+                      <div key={p.id + section.key} className="group flex flex-col">
+                        <a href={`/product/${p.id}`} target="_blank" rel="noopener noreferrer" className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
+                          <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
+                        </a>
+                        <a href={`/product/${p.id}`} target="_blank" rel="noopener noreferrer"><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></a>
+                        <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Related products with free delivery on eligible orders */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Related products with free delivery on eligible orders</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[...related].reverse().map((p) => (
-                  <div key={p.id + 'freedel'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Sponsored */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Sponsored <span className="text-xs font-normal text-foreground/50 ml-2 cursor-pointer hover:underline">Leave ad feedback</span></h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {related.map((p) => (
-                  <div key={p.id + 'spons'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Featured items you may like */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Featured items you may like</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[...related].reverse().map((p) => (
-                  <div key={p.id + 'feat'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Customers frequently viewed */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Customers frequently viewed</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {related.map((p) => (
-                  <div key={p.id + 'viewed'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Popular products in the last 7 days */}
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Sponsored | Popular products in the last 7 days</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[...related].reverse().map((p) => (
-                  <div key={p.id + 'pop7'} className="group flex flex-col">
-                    <Link to={`/product/${p.id}`} className="block relative bg-[#f5f2ef] rounded-lg overflow-hidden aspect-square mb-2">
-                      <img src={p.image} alt={p.name} className="w-full h-full object-cover mix-blend-multiply transition-transform duration-500 group-hover:scale-105" />
-                    </Link>
-                    <Link to={`/product/${p.id}`}><h3 className="text-xs text-primary font-medium line-clamp-2 hover:underline leading-snug mb-1">{p.name}</h3></Link>
-                    <div className="flex items-baseline gap-1"><span className="text-xs">₹</span><span className="text-base font-bold">{p.price?.toLocaleString('en-IN')}</span></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
+                </div>
+              );
+            })}
           </div>
         )}
 
         <hr className="my-12 border-gray-200" />
 
-        {/* ── Bottom Section: Reviews ── */}
-        <div>
+        {/* ── Reviews Section ── */}
+        <div id="customer-reviews">
           <h2 className="text-2xl font-bold text-foreground mb-8">Customer reviews</h2>
           <div className="flex flex-col lg:flex-row gap-12">
-            
-            {/* Review Summary (Left Column) */}
+
+            {/* Review Summary */}
             <div className="w-full lg:w-72 flex-shrink-0">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex gap-1">
-                  {[1,2,3,4,5].map(i => <Star key={i} className={`w-6 h-6 ${i <= 4 ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />)}
-                </div>
-                <span className="text-lg font-bold">4.8 out of 5</span>
-              </div>
-              <p className="text-sm text-foreground/60 mb-6">{REVIEWS.length} global ratings</p>
-              
-              <div className="space-y-3 mb-8">
-                {[5,4,3,2,1].map(stars => {
-                  const count = REVIEWS.filter(r => r.stars === stars).length;
-                  const pct = Math.round((count / REVIEWS.length) * 100);
-                  return (
-                    <div key={stars} className="flex items-center gap-3 text-sm text-primary hover:underline cursor-pointer">
-                      <span className="w-10 text-right">{stars} star</span>
-                      <div className="flex-1 h-5 bg-gray-100 border border-gray-300 rounded overflow-hidden">
-                        <div className="h-full bg-amber-400" style={{ width: `${pct}%` }} />
+              {(() => {
+                const avg = reviews.length > 0 ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) : 0;
+                const dist = [5,4,3,2,1].map(star => ({ star, count: reviews.filter(r => r.rating === star).length, pct: reviews.length ? Math.round((reviews.filter(r => r.rating === star).length / reviews.length) * 100) : 0 }));
+                return (
+                  <>
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="flex gap-1">
+                        {[1,2,3,4,5].map(i => <Star key={i} className={`w-6 h-6 ${i <= Math.round(avg) ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />)}
                       </div>
-                      <span className="w-8 text-right">{pct}%</span>
+                      <span className="text-lg font-bold text-foreground">{avg > 0 ? avg.toFixed(1) : '0'} out of 5</span>
                     </div>
-                  );
-                })}
-              </div>
+                    <p className="text-sm text-foreground/60 mb-4">{reviews.length} global rating{reviews.length !== 1 ? 's' : ''}</p>
+                    {/* Rating distribution */}
+                    <div className="space-y-2 mb-6">
+                      {dist.map(d => (
+                        <div key={d.star} className="flex items-center gap-2 text-sm">
+                          <span className="w-12 text-primary hover:underline cursor-pointer">{d.star} star</span>
+                          <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${d.pct}%` }}></div></div>
+                          <span className="w-10 text-right text-foreground/60">{d.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
 
               <h3 className="font-bold text-lg mb-2">Review this product</h3>
               <p className="text-sm text-foreground/70 mb-4">Share your thoughts with other customers</p>
-              <button className="w-full py-2 bg-white border border-gray-300 shadow-sm rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+              <button
+                onClick={() => { requireAuth(() => setShowReviewForm(true)); }}
+                className="w-full py-2.5 bg-white border border-gray-300 shadow-sm rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
                 Write a product review
               </button>
             </div>
 
-            {/* Individual Reviews (Right Column) */}
+            {/* Reviews List / Form */}
             <div className="flex-1">
-              <h3 className="font-bold text-lg mb-6">Top reviews from India</h3>
-              <div className="space-y-8">
-                {REVIEWS.map((r, i) => (
-                  <div key={i} className="border-b border-gray-200 pb-8 last:border-0">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-                        <span className="text-sm font-bold text-gray-600">{r.name[0]}</span>
-                      </div>
-                      <span className="font-medium text-sm">{r.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <StarRow count={r.stars} filled={true} />
-                      <span className="text-sm font-bold">{r.stars >= 4 ? 'Excellent quality and packaging' : 'Good product'}</span>
-                    </div>
-                    <p className="text-xs text-foreground/50 mb-3">Reviewed in India on {r.date}</p>
-                    <p className="text-xs font-bold text-orange-600 mb-2">Verified Purchase</p>
-                    <p className="text-sm text-foreground/80 leading-relaxed mb-4">{r.comment}</p>
-                    <div className="flex items-center gap-4 text-sm text-foreground/60">
-                      <button className="px-6 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Helpful</button>
-                      <span className="border-l border-gray-300 pl-4 hover:underline cursor-pointer">Report</span>
+              {/* Review Form */}
+              {showReviewForm && (
+                <div className="border border-gray-200 rounded-xl p-6 mb-8 bg-gray-50">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg">Write your review</h3>
+                    <button onClick={() => setShowReviewForm(false)} className="p-1 hover:bg-gray-200 rounded-full"><X className="w-5 h-5" /></button>
+                  </div>
+                  {/* Star rating */}
+                  <div className="mb-4">
+                    <label className="text-sm font-medium mb-2 block">Overall rating</label>
+                    <div className="flex gap-1">
+                      {[1,2,3,4,5].map(i => (
+                        <button key={i} onMouseEnter={() => setReviewHover(i)} onMouseLeave={() => setReviewHover(0)} onClick={() => setReviewRating(i)}>
+                          <Star className={`w-8 h-8 cursor-pointer transition-colors ${i <= (reviewHover || reviewRating) ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />
+                        </button>
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                  <div className="mb-4">
+                    <label className="text-sm font-medium mb-1 block">Headline (optional)</label>
+                    <input value={reviewTitle} onChange={e => setReviewTitle(e.target.value)} placeholder="What's most important to know?" className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-primary" />
+                  </div>
+                  <div className="mb-4">
+                    <label className="text-sm font-medium mb-1 block">Your review *</label>
+                    <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} rows={4} placeholder="What did you like or dislike? How did you use this product?" className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-primary resize-none" />
+                  </div>
+                  {/* Image upload */}
+                  <div className="mb-4">
+                    <label className="text-sm font-medium mb-2 block">Add photos (optional)</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {reviewImages.map((img, i) => (
+                        <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border group">
+                          <img src={img} alt="" className="w-full h-full object-cover" />
+                          <button onClick={() => setReviewImages(prev => prev.filter((_, idx) => idx !== i))} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"><X className="w-4 h-4 text-white" /></button>
+                        </div>
+                      ))}
+                      <button onClick={() => reviewImgRef.current?.click()} disabled={uploadingReviewImg} className="w-16 h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center hover:border-primary transition-colors">
+                        {uploadingReviewImg ? <Loader2 className="w-5 h-5 animate-spin text-gray-400" /> : <Camera className="w-5 h-5 text-gray-400" />}
+                      </button>
+                      <input ref={reviewImgRef} type="file" accept="image/*" className="hidden" onChange={handleReviewImageUpload} />
+                    </div>
+                  </div>
+                  <button onClick={handleSubmitReview} disabled={submittingReview || !reviewRating || !reviewComment.trim()} className="bg-primary text-white px-6 py-2.5 rounded-lg font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2">
+                    {submittingReview ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : 'Submit Review'}
+                  </button>
+                </div>
+              )}
 
+              {/* Reviews List */}
+              {reviews.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4"><Star className="w-8 h-8 text-gray-300" /></div>
+                  <h3 className="font-bold text-lg text-foreground mb-2">No reviews yet</h3>
+                  <p className="text-sm text-foreground/60 max-w-md">Be the first to share your experience with this product.</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {reviews.map((rev) => (
+                    <div key={rev.id} className="border-b border-gray-100 pb-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-sm font-bold text-foreground/70">{rev.user_name?.[0]?.toUpperCase() || 'C'}</div>
+                        <span className="text-sm font-medium text-foreground">{rev.user_name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="flex gap-0.5">{[1,2,3,4,5].map(i => <Star key={i} className={`w-4 h-4 ${i <= rev.rating ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />)}</div>
+                        {rev.title && <span className="font-bold text-sm">{rev.title}</span>}
+                      </div>
+                      <p className="text-xs text-foreground/50 mb-2">Reviewed on {new Date(rev.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                      {rev.is_verified_purchase && <span className="text-xs text-primary font-medium mb-2 block">Verified Purchase</span>}
+                      <p className="text-sm text-foreground/80 leading-relaxed">{rev.comment}</p>
+                      {rev.images && rev.images.length > 0 && (
+                        <div className="flex gap-2 mt-3">
+                          {rev.images.map((img: string, i: number) => (
+                            <div key={i} className="w-20 h-20 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition-opacity">
+                              <img src={img} alt="" className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -532,7 +641,7 @@ export function ProductDetail() {
         {/* ── CTA: Become a Seller ── */}
         <div className="bg-amber-50 rounded-2xl p-8 md:p-12 text-center border border-amber-100 max-w-4xl mx-auto">
           <Store className="w-12 h-12 text-amber-600 mx-auto mb-4" />
-          <h2 className="text-3xl font-bold text-amber-900 mb-4">Start Selling on Sacred Shoppe</h2>
+          <h2 className="text-3xl font-bold text-amber-900 mb-4">Start Selling on Swaxthika</h2>
           <p className="text-amber-800/80 mb-8 max-w-2xl mx-auto">
             Reach thousands of customers looking for authentic spiritual and religious products. Join our community of trusted sellers today.
           </p>

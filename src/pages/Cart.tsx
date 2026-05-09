@@ -139,11 +139,11 @@ export function Cart() {
                   {cartItems.map((item) => (
                     <div key={item.id} className={`p-6 flex flex-col md:grid md:grid-cols-12 gap-4 items-center transition-opacity ${updatingId === item.id ? 'opacity-50 pointer-events-none' : ''}`}>
                       <div className="col-span-6 flex items-center gap-4 w-full">
-                        <img src={item.products.image || 'https://via.placeholder.com/200'} alt={item.products.name} className="w-20 h-20 rounded-md object-cover bg-gray-100 border border-gray-100" />
+                        <img src={item.products.image || 'https://placehold.co/200x200/f3f4f6/9ca3af?text=No+Image'} alt={item.products.name} className="w-20 h-20 rounded-md object-cover bg-gray-100 border border-gray-100" />
                         <div className="flex-1">
-                          <Link to={`/product/${item.products.id}`} className="font-display font-medium text-foreground hover:text-primary transition-colors text-lg line-clamp-2">
+                          <a href={`/product/${item.products.id}`} target="_blank" rel="noopener noreferrer" className="font-display font-medium text-foreground hover:text-primary transition-colors text-lg line-clamp-2">
                             {item.products.name}
-                          </Link>
+                          </a>
                           <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-600 text-sm flex items-center gap-1 mt-2 transition-colors">
                             <Trash2 className="w-4 h-4" /> Remove
                           </button>

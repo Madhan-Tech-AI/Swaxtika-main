@@ -9,6 +9,7 @@ import { Checkout } from './pages/Checkout';
 import { TodayDeals } from './pages/TodayDeals';
 import { TrackOrder, Returns, Contact, FAQ, Shipping, Privacy, Terms } from './pages/StaticPages';
 import { Account, Wishlist } from './pages/AccountWishlist';
+import { SellerStore } from './pages/SellerStore';
 
 import { JoinForm } from './pages/JoinForm';
 import { ToastProvider } from './context/ToastContext';
@@ -28,6 +29,7 @@ function App() {
           <Route path="category/:slug" element={<Catalog />} />
           <Route path="today-deals" element={<TodayDeals />} />
           <Route path="product/:id" element={<ProductDetail />} />
+          <Route path="store/:sellerId" element={<SellerStore />} />
           <Route path="cart" element={<ProtectedRoute><Cart /></ProtectedRoute>} />
           <Route path="checkout" element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
           <Route path="track-order" element={<TrackOrder />} />

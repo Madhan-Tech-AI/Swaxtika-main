@@ -1,0 +1,10 @@
+-- ============================================================
+-- ⚠️  DEPRECATED — DO NOT RUN THIS FILE
+-- ============================================================
+-- This file contained RLS policies that referenced auth.users directly,
+-- which causes 403 Forbidden errors because the `authenticated` role
+-- cannot access the auth.users table.
+--
+-- Use `fix_rls_policies.sql` instead — it replaces all auth.users 
+-- references with the public `profiles.role` column.
+-- ============================================================

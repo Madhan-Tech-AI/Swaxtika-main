@@ -12,7 +12,7 @@ export function Footer() {
                 S
               </div>
               <span className="font-display font-bold text-2xl tracking-tight text-white">
-                Sacred<span className="text-primary">.</span>
+                Swaxthika<span className="text-primary">.</span>
               </span>
             </Link>
             <p className="text-primary-200 text-sm leading-relaxed mb-6">
@@ -41,7 +41,7 @@ export function Footer() {
               </a>
             </div>
           </div>
-          
+
           <div>
             <h3 className="font-display font-semibold text-white text-lg mb-6">Shop Categories</h3>
             <ul className="space-y-4">
@@ -69,10 +69,10 @@ export function Footer() {
             <p className="text-primary-200 text-sm leading-relaxed mb-4">
               Subscribe to receive updates on new arrivals, special offers, and spiritual insights.
             </p>
-            <form className="flex flex-col gap-3">
-              <input 
-                type="email" 
-                placeholder="Your email address" 
+            <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); alert('Thank you for subscribing!'); }}>
+              <input
+                type="email"
+                placeholder="Your email address"
                 className="bg-primary-800 border border-primary-700 text-white px-4 py-3 rounded-md focus:outline-none focus:border-primary transition-colors text-sm"
               />
               <button type="submit" className="bg-primary text-white font-medium px-4 py-3 rounded-md hover:bg-primary-600 transition-colors text-sm">
@@ -81,10 +81,10 @@ export function Footer() {
             </form>
           </div>
         </div>
-        
+
         <div className="border-t border-primary-800 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-primary-300 text-sm">
-            &copy; {new Date().getFullYear()} Sacred Shoppe. All rights reserved.
+            &copy; {new Date().getFullYear()} Swaxthika. All rights reserved.
           </p>
           <div className="flex items-center gap-6">
             <Link to="/privacy" className="text-primary-300 hover:text-white transition-colors text-sm">Privacy Policy</Link>
