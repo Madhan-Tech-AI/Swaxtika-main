@@ -9,7 +9,13 @@ export function SellerStore() {
   const { sellerId } = useParams();
   const [seller, setSeller] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [storeReviews, setStoreReviews] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'products' | 'about' | 'reviews'>('products');
   const [loading, setLoading] = useState(true);
+  const [newReviewRating, setNewReviewRating] = useState(5);
+  const [newReviewComment, setNewReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
   const { requireAuth, user } = useAuth();
   const { showToast } = useToast();
 
@@ -35,7 +41,26 @@ export function SellerStore() {
           .eq('status', 'Active')
           .order('created_at', { ascending: false });
 
-        if (pData) setProducts(pData);
+        if (pData) {
+          setProducts(pData);
+          if (pData.length > 0) {
+            const productIds = pData.map((p: any) => p.id);
+            const { data: rData } = await supabase
+              .from('product_reviews')
+              .select('*')
+              .in('product_id', productIds)
+              .order('created_at', { ascending: false });
+            if (rData) setReviews(rData);
+          }
+        }
+
+        // Fetch store reviews
+        const { data: srData } = await supabase
+          .from('store_reviews')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .order('created_at', { ascending: false });
+        if (srData) setStoreReviews(srData);
       } catch (err) {
         console.error('Error fetching store data:', err);
       } finally {
@@ -71,6 +96,38 @@ export function SellerStore() {
       } catch (error) {
         console.error('Error adding to cart:', error);
         showToast('error', 'Cart Error', 'Failed to add item to cart.');
+      }
+    });
+  };
+
+  const handleSubmitStoreReview = async () => {
+    requireAuth(async () => {
+      if (!user || !seller) return;
+      setSubmittingReview(true);
+      try {
+        const { data, error } = await supabase
+          .from('store_reviews')
+          .insert([{
+            seller_id: seller.id,
+            user_id: user.id,
+            user_name: user.user_metadata?.full_name || 'Customer',
+            rating: newReviewRating,
+            comment: newReviewComment
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setStoreReviews([data, ...storeReviews]);
+        setNewReviewComment('');
+        setNewReviewRating(5);
+        showToast('success', 'Review Submitted', 'Thank you for reviewing our store!');
+      } catch (err) {
+        console.error('Error submitting store review:', err);
+        showToast('error', 'Error', 'Failed to submit review. Please try again.');
+      } finally {
+        setSubmittingReview(false);
       }
     });
   };
@@ -159,13 +216,22 @@ export function SellerStore() {
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             <nav className="flex items-center gap-8">
-              <button className="text-sm font-bold text-primary border-b-2 border-primary h-16 flex items-center">
+              <button 
+                onClick={() => setActiveTab('products')} 
+                className={`text-sm font-bold h-16 flex items-center border-b-2 transition-colors ${activeTab === 'products' ? 'text-primary border-primary' : 'text-foreground/60 border-transparent hover:text-primary'}`}
+              >
                 All Products
               </button>
-              <a href="#about" className="text-sm font-medium text-foreground/60 hover:text-primary transition-colors h-16 flex items-center">
+              <button 
+                onClick={() => setActiveTab('about')} 
+                className={`text-sm font-bold h-16 flex items-center border-b-2 transition-colors ${activeTab === 'about' ? 'text-primary border-primary' : 'text-foreground/60 border-transparent hover:text-primary'}`}
+              >
                 About Store
-              </a>
-              <button className="text-sm font-medium text-foreground/60 hover:text-primary transition-colors h-16 flex items-center">
+              </button>
+              <button 
+                onClick={() => setActiveTab('reviews')} 
+                className={`text-sm font-bold h-16 flex items-center border-b-2 transition-colors ${activeTab === 'reviews' ? 'text-primary border-primary' : 'text-foreground/60 border-transparent hover:text-primary'}`}
+              >
                 Reviews
               </button>
             </nav>
@@ -179,8 +245,8 @@ export function SellerStore() {
       </div>
 
       {/* About Section */}
-      {seller.store_description && (
-        <section id="about" className="bg-white border-b border-gray-100 py-16">
+      {activeTab === 'about' && (
+        <section className="bg-white border-b border-gray-100 py-16 animate-in fade-in duration-300">
           <div className="container mx-auto px-4">
             <div className="max-w-4xl mx-auto">
               <div className="flex items-center gap-3 mb-6">
@@ -188,7 +254,7 @@ export function SellerStore() {
                 <h2 className="text-2xl font-display font-bold text-foreground">About Our Brand</h2>
               </div>
               <p className="text-lg text-foreground/70 leading-relaxed font-sans whitespace-pre-wrap">
-                {seller.store_description}
+                {seller.store_description || 'This store has not provided a description yet.'}
               </p>
             </div>
           </div>
@@ -196,69 +262,218 @@ export function SellerStore() {
       )}
 
       {/* Product Feed */}
-      <div className="container mx-auto px-4 py-16">
-        <div className="flex items-center justify-between mb-12">
-          <h2 className="text-3xl font-display font-bold text-foreground">Featured from {seller.business_name}</h2>
-          <div className="flex items-center gap-4">
-            <select className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20">
-              <option>Newest Arrivals</option>
-              <option>Price: Low to High</option>
-              <option>Price: High to Low</option>
-            </select>
+      {activeTab === 'products' && (
+        <div className="container mx-auto px-4 py-16 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between mb-12">
+            <h2 className="text-3xl font-display font-bold text-foreground">Featured from {seller.business_name}</h2>
+            <div className="flex items-center gap-4">
+              <select className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20">
+                <option>Newest Arrivals</option>
+                <option>Price: Low to High</option>
+                <option>Price: High to Low</option>
+              </select>
+            </div>
           </div>
-        </div>
 
-        {products.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-[40px] border border-dashed border-gray-200">
-            <ShoppingCart className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-            <p className="text-foreground/50">No products available in this store yet.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-8">
-            {products.map((product) => (
-              <div key={product.id} className="group flex flex-col bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 hover:-translate-y-1">
-                <a href={`/product/${product.id}`} target="_blank" rel="noopener noreferrer" className="block relative aspect-square overflow-hidden bg-gray-50">
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                  />
-                  {/* Hover Overlay */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-6">
-                    <button 
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToCart(product); }}
-                      className="w-full bg-white text-foreground py-3 rounded-xl font-bold text-sm transform translate-y-4 group-hover:translate-y-0 transition-transform shadow-xl"
-                    >
-                      Quick Add
-                    </button>
-                  </div>
-                </a>
-                <div className="p-6">
-                  <div className="flex flex-col gap-1 mb-3">
-                    <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-primary/60">{product.category}</span>
-                    <a href={`/product/${product.id}`} target="_blank" rel="noopener noreferrer">
-                      <h3 className="text-base font-bold text-foreground leading-tight line-clamp-2 hover:text-primary transition-colors h-10">
-                        {product.name}
-                      </h3>
-                    </a>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-lg font-extrabold text-foreground">₹{product.price.toLocaleString('en-IN')}</span>
-                      {product.original_price > product.price && (
-                        <span className="text-[10px] text-foreground/30 line-through">₹{product.original_price.toLocaleString('en-IN')}</span>
-                      )}
+          {products.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-[40px] border border-dashed border-gray-200">
+              <ShoppingCart className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+              <p className="text-foreground/50">No products available in this store yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-8">
+              {products.map((product) => (
+                <div key={product.id} className="group flex flex-col bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 hover:-translate-y-1">
+                  <a href={`/product/${product.id}`} target="_blank" rel="noopener noreferrer" className="block relative aspect-square overflow-hidden bg-gray-50">
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-6">
+                      <button 
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToCart(product); }}
+                        className="w-full bg-white text-foreground py-3 rounded-xl font-bold text-sm transform translate-y-4 group-hover:translate-y-0 transition-transform shadow-xl"
+                      >
+                        Quick Add
+                      </button>
                     </div>
-                    <button className="p-2 bg-primary/5 text-primary rounded-xl hover:bg-primary hover:text-white transition-colors">
-                      <ArrowRight className="w-5 h-5" />
-                    </button>
+                  </a>
+                  <div className="p-6">
+                    <div className="flex flex-col gap-1 mb-3">
+                      <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-primary/60">{product.category}</span>
+                      <a href={`/product/${product.id}`} target="_blank" rel="noopener noreferrer">
+                        <h3 className="text-base font-bold text-foreground leading-tight line-clamp-2 hover:text-primary transition-colors h-10">
+                          {product.name}
+                        </h3>
+                      </a>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-lg font-extrabold text-foreground">₹{product.price.toLocaleString('en-IN')}</span>
+                        {product.original_price > product.price && (
+                          <span className="text-[10px] text-foreground/30 line-through">₹{product.original_price.toLocaleString('en-IN')}</span>
+                        )}
+                      </div>
+                      <button onClick={() => handleAddToCart(product)} className="p-2 bg-primary/5 text-primary rounded-xl hover:bg-primary hover:text-white transition-colors">
+                        <ArrowRight className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Reviews Tab */}
+      {activeTab === 'reviews' && (
+        <div className="container mx-auto px-4 py-16 animate-in fade-in duration-300 max-w-4xl">
+          {/* Write a Store Review */}
+          <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 mb-12">
+            <h2 className="text-2xl font-display font-bold text-foreground mb-6">Review {seller.business_name}</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-foreground/60 mb-2">Your Rating</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setNewReviewRating(star)}
+                      className="p-1 hover:scale-110 transition-transform"
+                    >
+                      <Star
+                        className={`w-8 h-8 ${star <= newReviewRating ? 'fill-amber-400 text-amber-400' : 'text-gray-200'}`}
+                      />
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
+              <div>
+                <label className="block text-sm font-bold text-foreground/60 mb-2">Your Feedback</label>
+                <textarea
+                  value={newReviewComment}
+                  onChange={(e) => setNewReviewComment(e.target.value)}
+                  placeholder="Tell us about your experience with this store..."
+                  className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[120px]"
+                ></textarea>
+              </div>
+              <button
+                onClick={handleSubmitStoreReview}
+                disabled={submittingReview || !newReviewComment.trim()}
+                className="bg-primary text-white px-8 py-3 rounded-xl font-bold hover:bg-primary-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {submittingReview ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Review'}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className="space-y-12">
+            {/* Store Specific Reviews */}
+            <div>
+              <div className="flex items-center gap-3 mb-8">
+                <Store className="w-6 h-6 text-primary" />
+                <h2 className="text-2xl font-display font-bold text-foreground">What customers say about the store</h2>
+              </div>
+              
+              {storeReviews.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-foreground/50">No store reviews yet. Be the first to review!</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {storeReviews.map((rev) => (
+                    <div key={rev.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center text-sm font-bold text-primary">
+                          {rev.user_name?.[0]?.toUpperCase() || 'C'}
+                        </div>
+                        <div>
+                          <span className="text-sm font-bold text-foreground block">{rev.user_name || 'Customer'}</span>
+                          <div className="flex gap-0.5">
+                            {[1, 2, 3, 4, 5].map(i => (
+                              <Star key={i} className={`w-3 h-3 ${i <= rev.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-200'}`} />
+                            ))}
+                          </div>
+                        </div>
+                        <span className="ml-auto text-xs text-foreground/30">
+                          {new Date(rev.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground/80 leading-relaxed">{rev.comment}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Product Reviews */}
+            <div>
+              <div className="flex items-center gap-3 mb-8">
+                <Star className="w-6 h-6 text-primary fill-primary" />
+                <h2 className="text-2xl font-display font-bold text-foreground">Product Reviews from this store</h2>
+              </div>
+              
+              {reviews.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-foreground/50">No product reviews yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {reviews.map((rev) => {
+                    const reviewedProduct = products.find(p => p.id === rev.product_id);
+                    return (
+                      <div key={rev.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm font-bold text-foreground/70">
+                                {rev.user_name?.[0]?.toUpperCase() || 'C'}
+                              </div>
+                              <span className="text-sm font-medium text-foreground">{rev.user_name || 'Customer'}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="flex gap-0.5">
+                                {[1, 2, 3, 4, 5].map(i => (
+                                  <Star key={i} className={`w-4 h-4 ${i <= rev.rating ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200'}`} />
+                                ))}
+                              </div>
+                              {rev.title && <span className="font-bold text-sm">{rev.title}</span>}
+                            </div>
+                            <p className="text-xs text-foreground/50 mb-4">
+                              Reviewed on {new Date(rev.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                          
+                          {reviewedProduct && (
+                            <Link to={`/product/${reviewedProduct.id}`} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg transition-colors border border-gray-100 group max-w-[200px]">
+                              <img src={reviewedProduct.image} alt="" className="w-10 h-10 rounded object-cover" />
+                              <span className="text-xs font-medium line-clamp-2 text-foreground/70 group-hover:text-primary transition-colors">{reviewedProduct.name}</span>
+                            </Link>
+                          )}
+                        </div>
+                        
+                        <p className="text-sm text-foreground/80 leading-relaxed mb-4">{rev.comment}</p>
+                        
+                        {rev.images && rev.images.length > 0 && (
+                          <div className="flex gap-2">
+                            {rev.images.map((img: string, i: number) => (
+                              <div key={i} className="w-20 h-20 rounded-lg overflow-hidden border">
+                                <img src={img} alt="" className="w-full h-full object-cover" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
