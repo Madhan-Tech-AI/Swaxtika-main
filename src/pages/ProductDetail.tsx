@@ -16,6 +16,7 @@ export function ProductDetail() {
   const [pincode, setPincode] = useState('');
   const [pincodeMsg, setPincodeMsg] = useState('');
   const [wishlisted, setWishlisted] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
   const [banners, setBanners] = useState<any[]>([]);
   const [sellerName, setSellerName] = useState('');
   // Reviews state
@@ -87,11 +88,16 @@ export function ProductDetail() {
 
         const { data: bns } = await supabase.from('banners').select('*');
         if (bns) setBanners(bns);
+
+        if (user) {
+          const { data: wlData } = await supabase.from('wishlists').select('id').eq('product_id', id).eq('user_id', user.id).single();
+          if (wlData) setWishlisted(true);
+        }
       }
       setLoading(false);
     };
     fetchData();
-  }, [id]);
+  }, [id, user]);
 
   // Real-time reviews subscription
   useEffect(() => {
@@ -166,6 +172,28 @@ export function ProductDetail() {
       } catch {
         showToast('error', 'Error', 'Failed to add to cart.');
       } finally { setIsAdding(false); }
+    });
+  };
+
+  const toggleWishlist = async () => {
+    requireAuth(async () => {
+      if (!user || !product) return;
+      setWishlistLoading(true);
+      try {
+        if (wishlisted) {
+          await supabase.from('wishlists').delete().eq('user_id', user.id).eq('product_id', product.id);
+          setWishlisted(false);
+          showToast('success', 'Removed', `${product.name} removed from wishlist`);
+        } else {
+          await supabase.from('wishlists').insert([{ user_id: user.id, product_id: product.id }]);
+          setWishlisted(true);
+          showToast('success', 'Wishlisted', `${product.name} added to wishlist`);
+        }
+      } catch (err) {
+        showToast('error', 'Error', 'Failed to update wishlist');
+      } finally {
+        setWishlistLoading(false);
+      }
     });
   };
 
@@ -417,10 +445,11 @@ export function ProductDetail() {
               </div>
 
               <button 
-                onClick={() => { setWishlisted(!wishlisted); requireAuth(() => showToast('success', wishlisted ? 'Removed' : 'Wishlisted', product.name)); }}
-                className="w-full py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                onClick={toggleWishlist}
+                disabled={wishlistLoading}
+                className="w-full py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm flex items-center justify-center gap-2"
               >
-                Add to Wish List
+                {wishlistLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : wishlisted ? 'Remove from Wish List' : 'Add to Wish List'}
               </button>
             </div>
           </div>
