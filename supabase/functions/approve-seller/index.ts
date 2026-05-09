@@ -93,8 +93,20 @@ serve(async (req) => {
       },
     });
 
+    let userId = newUser?.user?.id;
+
     if (createError) {
-      if (!createError.message.includes("already registered")) {
+      if (createError.message.includes("already registered")) {
+        // Fetch existing user to get their ID
+        const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        if (listError) throw listError;
+        
+        const existingUser = existingUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+        if (!existingUser) {
+          throw new Error("User reported as registered but not found in list");
+        }
+        userId = existingUser.id;
+      } else {
         return new Response(
           JSON.stringify({ error: createError.message }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -102,10 +114,17 @@ serve(async (req) => {
       }
     }
 
-    // ── Step 6: Approve the application ─────────────────────────────────────
+    if (!userId) {
+      throw new Error("Could not determine User ID for seller account");
+    }
+
+    // ── Step 6: Approve the application and link user_id ─────────────────────
     const { error: updateError } = await supabaseAdmin
       .from("seller_applications")
-      .update({ status: "approved" })
+      .update({ 
+        status: "approved",
+        user_id: userId
+      })
       .eq("id", application_id);
 
     if (updateError) {
